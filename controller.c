@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -10,6 +11,7 @@
 
 static void init_config(char *fn, struct sockaddr_in **swch_p, int *switch_num, int ***band_matr, int ***path_matr);
 static void free_config(struct sockaddr_in *switches, int switch_num, int **band_matr, int **path_matr);
+static void compute_path(int **path_matr, int **band_matr, int num);
 
 int main(int argc, char *argv[])
 {
@@ -20,11 +22,17 @@ int main(int argc, char *argv[])
 	int 			i,j;
 	int			id;
 	size_t			len;
+	int 			count;
 
 	struct sockaddr_in*	switches; 	//array of addrress of switches
 	int 			switch_num;	//num of switches
 	int**			band_matr;	//bandwidth matrix of network
 	int**			path_matr;	//hop matrix of network
+	struct timeval 		time1;
+	struct timeval		trem;
+        fd_set                  readfds;
+	int*			mcount;
+
 
 	if (argc != 4) {
 		printf("usage: ./controller hostname portnumber config_file");
@@ -34,6 +42,7 @@ int main(int argc, char *argv[])
 	init_config(argv[3], &switches, &switch_num, &band_matr, &path_matr);
 
 	s = sock_bind(AF_INET, SOCK_DGRAM, argv[1], argv[2]);
+	mcount = calloc(switch_num, sizeof(*mcount));
 
 	//gather initial requests;
 	i = 0;
@@ -70,9 +79,71 @@ int main(int argc, char *argv[])
 		sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
 	}
 
+
+	//main loop
+        FD_ZERO(&readfds);
+        FD_SET(s, &readfds);
+        trem.tv_sec = KTIME;
+        trem.tv_usec = 0;
+        while(1) {
+                gettimeofday(&time1, NULL);
+                count = select(1, &readfds, NULL, NULL, &trem);
+		if (count) {
+		//socket ready for reading
+
+			time_rem(&trem, &time1);
+		}
+		else {
+		//increment and check
+                        trem.tv_sec = KTIME;
+                        trem.tv_usec = 0;
+			
+		}
+	}	
+
+	free(mcount);
 	free_config(switches, switch_num, band_matr, path_matr);
 	close(s);
 	exit(EXIT_SUCCESS);
+}
+
+static void
+traverse(int node, int source, int hop, int bneck, int been[], int **path_matr, int **band_matr, int num) {
+	int i;
+	int temp_bneck;
+
+	if (bneck > been[node]){
+		path_matr[source][node] = hop;
+		been[node] = bneck;
+	}
+	
+	for (i = 0; i < num; i++) 
+		if (band_matr[node][i] > been[i]) 
+			traverse(i, source, hop, band_matr[node][i], been, path_matr, band_matr, num);
+}
+
+static void 
+compute_path(int **path_matr, int **band_matr, int num) {
+	int i;
+	int j;
+	int k;
+	int been[num];
+	
+	for (i = 0; i < num; i++) {
+		been[i] = 0;
+		for (j = 0; j < num; j++)
+			path_matr[i][j] = 0;
+	}
+
+
+	for (i = 0; i < num; i++) {
+		for (j = 0; j < num; j++) {
+			if (band_matr[i][j] > 0)
+				traverse(j, i, j, band_matr[i][j], been, path_matr, band_matr, num);
+		}
+		for (k = 0; k < num; k++)
+			been[k] = 0;
+	}
 }
 
 static void 
@@ -94,29 +165,12 @@ init_config(char *fn, struct sockaddr_in **swch_p, int *switch_num, int ***band_
 	*switch_num = s1;
 
 	*swch_p = calloc(s1, sizeof(struct sockaddr_in));
-	if (*swch_p == NULL) {
-		fprintf(stderr, "malloc failed\n");
-	}
 	*band_matr = calloc(s1, sizeof(int *));
-	if (*band_matr == NULL) {
-		fprintf(stderr, "malloc failed\n");
-	}
-	for (i = 0; i < s1; i++) {
+	for (i = 0; i < s1; i++) 
 		(*band_matr)[i] = calloc(s1, sizeof(int));
-		if ((*band_matr)[i] == NULL) {
-			fprintf(stderr, "malloc failed\n");
-		}
-	}	
 	*path_matr = calloc(s1, sizeof(int *));
-	if (*path_matr == NULL) {
-		fprintf(stderr, "malloc failed\n");
-	}
-	for (i = 0; i < s1; i++) {
+	for (i = 0; i < s1; i++) 
 		(*path_matr)[i] = calloc(s1, sizeof(int));
-		if ((*path_matr)[i] == NULL) {
-			fprintf(stderr, "malloc failed\n");
-		}
-	}	
 
 	int rv;
 	while ((rv=fscanf(fp, "%i %i %i %i ", &s1, &s2, &bw, &delay)) == 4) {

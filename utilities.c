@@ -1,5 +1,40 @@
 #include "utilities.h"
 
+void
+time_rem(struct timeval *result, struct timeval *last) {
+	struct timeval current;
+
+	gettimeofday(&current, NULL);
+
+	if (current.tv_usec < last->tv_usec) {
+		current.tv_sec = current.tv_sec - last->tv_sec - 1;
+		current.tv_usec = 1000000 - last->tv_usec + current.tv_usec;
+	}
+	else {
+		current.tv_sec = current.tv_sec - last->tv_sec;
+		current.tv_usec = current.tv_usec - last->tv_usec;
+	}
+
+	if (result->tv_sec < current.tv_sec) {
+		result->tv_sec = 0;
+		result->tv_usec = 0;
+		return;
+ 	}
+	if (result->tv_usec < current.tv_usec) {
+		if (result->tv_sec <= current.tv_sec) {
+			result->tv_sec = 0;
+			result->tv_usec = 0;
+			return;
+		}
+		result->tv_sec = result->tv_sec - current.tv_sec - 1;
+		result->tv_usec = 1000000 - current.tv_usec + result->tv_usec;
+	}
+	else {
+		result->tv_sec = result->tv_sec - current.tv_sec;
+		result->tv_usec = result->tv_usec - current.tv_usec;
+	}
+}
+
 struct addrinfo * 
 get_hostaddr(const char* hostname, const char *servname) {
 	int s;

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -20,7 +21,14 @@ main(int argc, char *argv[])
 	struct addrinfo *	controller_addr;
 	struct sockaddr_in*	switches;
 	char*			nbor;
+	char*			live_nbor;
+	int*			mcount;
+	char*			route;
 	int			switch_num;
+	struct timeval		time1;
+	struct timeval		trem;
+	fd_set			readfds;
+
 	if (argc != 4) {
 		printf("usage: ./switch controller_hostname controller_portnumber id");
 		exit(EXIT_FAILURE);
@@ -44,16 +52,73 @@ main(int argc, char *argv[])
 	switch_num = buf[1];
 	switches = calloc(switch_num, sizeof(*switches));
 	nbor = calloc(switch_num, sizeof(*nbor));
+	live_nbor = calloc(switch_num, sizeof(*live_nbor));
+	mcount = calloc(switch_num, sizeof(*mcount));
+	route = calloc(2*switch_num, sizeof(*route));
 	memcpy(switches, &buf[2+switch_num], switch_num*sizeof(*switches));
 	memcpy(nbor, &buf[2], switch_num);
+	memcpy(live_nbor, nbor, switch_num);
 
 	for (i = 0; i < switch_num; i++) {
 		print_sockaddr((struct sockaddr *) &switches[i]);
 	}
 
 	//main loop
+	FD_ZERO(&readfds);
+	FD_SET(s, &readfds);
+	trem.tv_sec = KTIME;
+	trem.tv_usec = 0;
+	while(1) {
+		gettimeofday(&time1, NULL);
+		count = select(1, &readfds, NULL, NULL, &trem);
+		if (count) {
+		//socket ready for reading
+			recvfrom(s, buf, 512, 0, NULL, NULL);
+			
+			if (buf[0] == KEEP_ALIVE) {
+				i = buf[1] - 1;
+				mcount[i] = 0;
+				live_nbor[i] = 1;
+			}	
+			else if (buf[0] == ROUTE_UPDATE) {
+				memcpy(route, &buf[1], 2*switch_num);
+			}
+			
+			time_rem(&trem, &time1);
+		}
+		else {
+		//timeout, time to transmit
+			trem.tv_sec = KTIME;
+			trem.tv_usec = 0;
+
+			for (i = 0; i < switch_num; i++) {
+				if (nbor[i]) {
+					if (mcount[i] > MTIME)
+						live_nbor[i] = 0;
+					else
+						mcount[i]++;
+				}
+			}
+	
+			for (i = 0; i < switch_num; i++) {
+				if (nbor[i]) {
+					buf[0] = KEEP_ALIVE;
+					buf[1] = id;
+					sendto(s, buf, 2, 0, (struct sockaddr *) &switches[i], controller_addr->ai_addrlen);
+				}
+			}
+			buf[0] = TOPOLOGY_UPDATE;
+			buf[1] = id;
+			memcpy(&buf[2], live_nbors, switch_num);
+			sendto(s, buf, 2+switch_num, 0, controller_addr->ai_addr, controller_addr->ai_addrlen);
+
+		}
+	}
+
+	free(mcount);
 	free(switches);
 	free(nbor);
+	free(live_nbor);
 	freeaddrinfo(controller_addr);
 	close(s);
 	exit(EXIT_SUCCESS);
