@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -21,7 +22,7 @@ main(int argc, char *argv[])
 	struct addrinfo *	controller_addr;
 	struct sockaddr_in*	switches;
 	char*			nbor;
-	char*			live_nbor;
+	char*			live_nbors;
 	int*			mcount;
 	char*			route;
 	int			switch_num;
@@ -52,12 +53,12 @@ main(int argc, char *argv[])
 	switch_num = buf[1];
 	switches = calloc(switch_num, sizeof(*switches));
 	nbor = calloc(switch_num, sizeof(*nbor));
-	live_nbor = calloc(switch_num, sizeof(*live_nbor));
+	live_nbors = calloc(switch_num, sizeof(*live_nbors));
 	mcount = calloc(switch_num, sizeof(*mcount));
 	route = calloc(2*switch_num, sizeof(*route));
 	memcpy(switches, &buf[2+switch_num], switch_num*sizeof(*switches));
 	memcpy(nbor, &buf[2], switch_num);
-	memcpy(live_nbor, nbor, switch_num);
+	memcpy(live_nbors, nbor, switch_num);
 
 	for (i = 0; i < switch_num; i++) {
 		print_sockaddr((struct sockaddr *) &switches[i]);
@@ -78,7 +79,7 @@ main(int argc, char *argv[])
 			if (buf[0] == KEEP_ALIVE) {
 				i = buf[1] - 1;
 				mcount[i] = 0;
-				live_nbor[i] = 1;
+				live_nbors[i] = 1;
 			}	
 			else if (buf[0] == ROUTE_UPDATE) {
 				memcpy(route, &buf[1], 2*switch_num);
@@ -94,7 +95,7 @@ main(int argc, char *argv[])
 			for (i = 0; i < switch_num; i++) {
 				if (nbor[i]) {
 					if (mcount[i] > MTIME)
-						live_nbor[i] = 0;
+						live_nbors[i] = 0;
 					else
 						mcount[i]++;
 				}
@@ -118,7 +119,7 @@ main(int argc, char *argv[])
 	free(mcount);
 	free(switches);
 	free(nbor);
-	free(live_nbor);
+	free(live_nbors);
 	freeaddrinfo(controller_addr);
 	close(s);
 	exit(EXIT_SUCCESS);

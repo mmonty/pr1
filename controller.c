@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -117,9 +118,13 @@ traverse(int node, int source, int hop, int bneck, int been[], int **path_matr, 
 		been[node] = bneck;
 	}
 	
-	for (i = 0; i < num; i++) 
-		if (band_matr[node][i] > been[i]) 
-			traverse(i, source, hop, band_matr[node][i], been, path_matr, band_matr, num);
+	for (i = 0; i < num; i++)  {
+		temp_bneck = band_matr[node][i];
+		if (temp_bneck > bneck)
+			temp_bneck = bneck;
+		if (temp_bneck > been[i]) 
+			traverse(i, source, hop, temp_bneck, been, path_matr, band_matr, num);
+	}
 }
 
 static void 
