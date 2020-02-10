@@ -56,8 +56,9 @@ main(int argc, char *argv[])
 	live_nbors = calloc(switch_num, sizeof(*live_nbors));
 	mcount = calloc(switch_num, sizeof(*mcount));
 	route = calloc(2*switch_num, sizeof(*route));
-	memcpy(switches, &buf[2+switch_num], switch_num*sizeof(*switches));
+	memcpy(switches, &buf[2+switch_num+2*switch_num], switch_num*sizeof(*switches));
 	memcpy(nbor, &buf[2], switch_num);
+	memcpy(route, &buf[2+switch_num], 2*switch_num);
 	memcpy(live_nbors, nbor, switch_num);
 
 	for (i = 0; i < switch_num; i++) {

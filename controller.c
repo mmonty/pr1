@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 
 #include <unistd.h>
 #include <sys/select.h>
@@ -13,6 +14,8 @@
 static void init_config(char *fn, struct sockaddr_in **swch_p, int *switch_num, int ***band_matr, int ***path_matr);
 static void free_config(struct sockaddr_in *switches, int switch_num, int **band_matr, int **path_matr);
 static void compute_path(int **path_matr, int **band_matr, int num);
+static void print_path(int **path_matr, int num);
+static void write_route(char * dhpair, int sw_ind, int **path_matr, int num);
 
 int main(int argc, char *argv[])
 {
@@ -42,6 +45,7 @@ int main(int argc, char *argv[])
 
 	init_config(argv[3], &switches, &switch_num, &band_matr, &path_matr);
 
+	compute_path(path_matr, band_matr, switch_num);
 	s = sock_bind(AF_INET, SOCK_DGRAM, argv[1], argv[2]);
 	mcount = calloc(switch_num, sizeof(*mcount));
 
@@ -68,8 +72,8 @@ int main(int argc, char *argv[])
 	//send initial responses
 	buf[0] = REGISTER_RESPONSE;
 	buf[1] = switch_num;
-	memcpy(&buf[switch_num+2], switches, sizeof(*switches)*switch_num);
-	len = 2 + switch_num*sizeof(*switches) + switch_num;
+	memcpy(&buf[2 + switch_num + 2*switch_num], switches, sizeof(*switches)*switch_num);
+	len = 2 + switch_num*sizeof(*switches) + 3*switch_num;
 	for (i = 0; i < switch_num; i++) {
 		for (j = 0; j < switch_num; j++) {
 			if (band_matr[i][j])
@@ -77,6 +81,8 @@ int main(int argc, char *argv[])
 			else
 				buf[2+j] = 0;
 		}
+		write_route(&buf[2+switch_num], i, path_matr, switch_num);
+		
 		sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
 	}
 
@@ -108,47 +114,49 @@ int main(int argc, char *argv[])
 	exit(EXIT_SUCCESS);
 }
 
-static void
-traverse(int node, int source, int hop, int bneck, int been[], int **path_matr, int **band_matr, int num) {
-	int i;
-	int temp_bneck;
+static void 
+write_route(char * dhpair, int sw_ind, int **path_matr, int num) {
+	int i,j;
 
-	if (bneck > been[node]){
-		path_matr[source][node] = hop;
-		been[node] = bneck;
+	for (j = 0; j < num; j++) {
+		dhpair[2*j] = j;
+		dhpair[2*j+1] = path_matr[sw_ind][j];
+		
 	}
-	
-	for (i = 0; i < num; i++)  {
-		temp_bneck = band_matr[node][i];
-		if (temp_bneck > bneck)
-			temp_bneck = bneck;
-		if (temp_bneck > been[i]) 
-			traverse(i, source, hop, temp_bneck, been, path_matr, band_matr, num);
-	}
+	return;
 }
+
 
 static void 
 compute_path(int **path_matr, int **band_matr, int num) {
 	int i;
 	int j;
 	int k;
-	int been[num];
+	int minb;
+	int bw[num][num];
 	
 	for (i = 0; i < num; i++) {
-		been[i] = 0;
-		for (j = 0; j < num; j++)
-			path_matr[i][j] = 0;
-	}
-
-
-	for (i = 0; i < num; i++) {
 		for (j = 0; j < num; j++) {
-			if (band_matr[i][j] > 0)
-				traverse(j, i, j, band_matr[i][j], been, path_matr, band_matr, num);
+			
+			bw[i][j] = band_matr[i][j] >= 0 ? band_matr[i][j] : 0;
+			if (i == j)
+				bw[i][i] = INT_MAX;
+			path_matr[i][j] = j;
 		}
-		for (k = 0; k < num; k++)
-			been[k] = 0;
 	}
+
+	for (k = 0; k < num; k++) {
+		for (i = 0; i < num; i++) {	
+			for (j = 0; j < num; j++) {	
+				minb = bw[i][k] < bw[k][j] ? bw[i][k] : bw[k][j];
+				if (bw[i][j] < minb) {
+					bw[i][j] = minb;
+					path_matr[i][j] = path_matr[i][k];
+				}
+			}
+		}
+	}
+	return;
 }
 
 static void 
@@ -179,7 +187,6 @@ init_config(char *fn, struct sockaddr_in **swch_p, int *switch_num, int ***band_
 
 	int rv;
 	while ((rv=fscanf(fp, "%i %i %i %i ", &s1, &s2, &bw, &delay)) == 4) {
-		printf("%d %d %d %d\n", s1, s2, bw, delay);
 		(*band_matr)[s1-1][s2-1] = bw;
 		(*band_matr)[s2-1][s1-1] = bw;
 	}
@@ -203,3 +210,13 @@ free_config(struct sockaddr_in *switches, int switch_num, int **band_matr, int *
 	free(path_matr);
 	free(switches);
 }
+
+static void print_path(int **path_matr, int num) {
+	int i, j;
+	
+	printf("new path: \n");
+	for (i = 0; i < num; i++)
+		for (j = 0; j < num; j++)
+			printf("%d, %d : %d\n", i+1, j+1, path_matr[i][j]+1);
+}
+
