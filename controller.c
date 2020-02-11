@@ -27,6 +27,7 @@ int main(int argc, char *argv[])
 	int			id;
 	size_t			len;
 	int 			count;
+	int 			recompute;
 
 	struct sockaddr_in*	switches; 	//array of addrress of switches
 	int 			switch_num;	//num of switches
@@ -34,12 +35,13 @@ int main(int argc, char *argv[])
 	int**			path_matr;	//hop matrix of network
 	struct timeval 		time1;
 	struct timeval		trem;
+	struct timeval		tcopy;
         fd_set                  readfds;
 	int*			mcount;
 
 
 	if (argc != 4) {
-		printf("usage: ./controller hostname portnumber config_file");
+		printf("usage: ./controller hostname portnumber config_file\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -62,11 +64,8 @@ int main(int argc, char *argv[])
 		}
 		id = buf[1];
 		switches[id-1] = peer;
+		printf("Got a REGISTER_REQUEST from id:%d\n", id);
 		i++;
-	}
-
-	for (i = 0; i < switch_num; i++) {
-		print_sockaddr((struct sockaddr *)&switches[i]);
 	}
 
 	//send initial responses
@@ -85,26 +84,124 @@ int main(int argc, char *argv[])
 		
 		sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
 	}
+        for (i = 0; i < switch_num; i++) {
+                print_sockaddr((struct sockaddr *) &switches[i]);
+        }
 
 
 	//main loop
-        FD_ZERO(&readfds);
-        FD_SET(s, &readfds);
-        trem.tv_sec = KTIME;
-        trem.tv_usec = 0;
+        tcopy.tv_sec = KTIME;
+        tcopy.tv_usec = 0;
         while(1) {
+        	FD_ZERO(&readfds);
+        	FD_SET(s, &readfds);
+		trem = tcopy;
                 gettimeofday(&time1, NULL);
-                count = select(1, &readfds, NULL, NULL, &trem);
+                count = select(s+1, &readfds, NULL, NULL, &trem);
 		if (count) {
 		//socket ready for reading
+			recvfrom(s, buf, 512, 0, (struct sockaddr *) &peer, &peer_len);
+			
+			if (buf[0] == REGISTER_REQUEST) {
+				id = buf[1];
+				printf("Got a new REGISTER_REQUEST from id:%d\n", id);
 
-			time_rem(&trem, &time1);
+				
+				mcount[id-1] = 0;
+				for (i = 0; i < switch_num; i++) {
+					if (band_matr[i][id-1] < 0)
+						band_matr[i][id-1] *= -1;
+				}
+				switches[id-1] = peer;
+
+				compute_path(path_matr, band_matr, switch_num);
+
+				buf[0] = REGISTER_RESPONSE;
+				buf[1] = switch_num;
+				memcpy(&buf[2 + switch_num + 2*switch_num], switches, sizeof(*switches)*switch_num);
+				len = 2 + switch_num*sizeof(*switches) + 3*switch_num;
+				for (j = 0; j < switch_num; j++) {
+					if (band_matr[id-1][j])
+						buf[2+j] = 1;
+					else
+						buf[2+j] = 0;
+				}
+				write_route(&buf[2+switch_num], id-1, path_matr, switch_num);
+				sendto(s, buf, len, 0, (struct sockaddr *)&switches[id-1], peer_len);
+
+				len = 1 + 2*switch_num;
+				buf[0] = ROUTE_UPDATE;
+				for (i = 0; i < switch_num; i++) {
+					write_route(&buf[1], i, path_matr, switch_num);
+					sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
+				}
+				print_path(path_matr, switch_num);
+			}
+
+			if (buf[0] == TOPOLOGY_UPDATE) {
+				id = buf[1];
+				printf("Got a TOPOLOGY_UPDATE from id:%d\n", id);
+
+				recompute = 0;
+				if (mcount[id-1] > MTIME) {
+					for (i = 0; i < switch_num; i++) {
+						if (band_matr[i][id-1] < 0) {
+							band_matr[i][id-1] *= -1;
+							recompute = 1;
+						}
+					}
+				}
+				mcount[id-1] = 0;
+				for (i = 0; i < switch_num; i++) {
+					if (band_matr[id-1][i] > 0 && buf[2+i] == 0) {
+						band_matr[id-1][i] *= -1;
+						recompute = 1;
+					}
+					if (band_matr[id-1][i] < 0 && buf[2+i] == 1 && mcount[i] <= MTIME) {
+						band_matr[id-1][i] *= -1;
+						recompute = 1;
+					}
+				}
+				if (recompute) {
+					compute_path(path_matr, band_matr, switch_num);
+					len = 1 + 2*switch_num;
+					buf[0] = ROUTE_UPDATE;
+					for (i = 0; i < switch_num; i++) {
+						write_route(&buf[1], i, path_matr, switch_num);
+						sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
+					}
+					print_path(path_matr, switch_num);
+				}
+			}
+			time_rem(&tcopy, &time1);
 		}
 		else {
 		//increment and check
-                        trem.tv_sec = KTIME;
-                        trem.tv_usec = 0;
-			
+                        tcopy.tv_sec = KTIME;
+                        tcopy.tv_usec = 0;
+
+			recompute = 0;
+			for (i = 0; i < switch_num; i++) {
+				if (mcount[i] > MTIME) {
+					for (j = 0; j < switch_num; j++) {
+						if (band_matr[j][i] > 0) {
+							recompute = 1;
+							band_matr[j][i] *= -1;
+						}
+					}
+				}
+				else
+					mcount[i]++;
+			}
+			if (recompute) {
+				compute_path(path_matr, band_matr, switch_num);
+				len = 1 + 2*switch_num;
+				buf[0] = ROUTE_UPDATE;
+				for (i = 0; i < switch_num; i++) {
+					write_route(&buf[1], i, path_matr, switch_num);
+					sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
+				}
+			}
 		}
 	}	
 
@@ -121,7 +218,6 @@ write_route(char * dhpair, int sw_ind, int **path_matr, int num) {
 	for (j = 0; j < num; j++) {
 		dhpair[2*j] = j;
 		dhpair[2*j+1] = path_matr[sw_ind][j];
-		
 	}
 	return;
 }

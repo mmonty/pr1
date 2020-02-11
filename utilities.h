@@ -26,10 +26,3 @@ int sock_bind(int domain, int type, const char *hostname, const char *servname);
 void print_sockaddr(struct sockaddr* addr);
 struct addrinfo *get_hostaddr(const char* hostname, const char *servname);
 void time_rem(struct timeval *result, struct timeval *last);
-
-
-struct swch {
-	int id;
-	struct sockaddr_in addr;
-};
-

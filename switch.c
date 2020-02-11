@@ -10,6 +10,8 @@
 
 #include "utilities.h"
 
+static void print_route(char *route, int id, int num);
+
 int 
 main(int argc, char *argv[])
 {
@@ -20,6 +22,8 @@ main(int argc, char *argv[])
 
 	int id;
 	struct addrinfo *	controller_addr;
+        struct sockaddr_in      peer;
+        socklen_t               peer_len = sizeof(struct sockaddr_in);
 	struct sockaddr_in*	switches;
 	char*			nbor;
 	char*			live_nbors;
@@ -28,10 +32,11 @@ main(int argc, char *argv[])
 	int			switch_num;
 	struct timeval		time1;
 	struct timeval		trem;
+	struct timeval		tcopy;
 	fd_set			readfds;
 
 	if (argc != 4) {
-		printf("usage: ./switch controller_hostname controller_portnumber id");
+		printf("usage: ./switch controller_hostname controller_portnumber id\n");
 		exit(EXIT_FAILURE);
 	}
 	
@@ -66,24 +71,30 @@ main(int argc, char *argv[])
 	}
 
 	//main loop
-	FD_ZERO(&readfds);
-	FD_SET(s, &readfds);
 	trem.tv_sec = KTIME;
 	trem.tv_usec = 0;
 	while(1) {
+		FD_ZERO(&readfds);
+		FD_SET(s, &readfds);
+		tcopy = trem;
 		gettimeofday(&time1, NULL);
-		count = select(1, &readfds, NULL, NULL, &trem);
+		count = select(s+1, &readfds, NULL, NULL, &tcopy);
 		if (count) {
 		//socket ready for reading
-			recvfrom(s, buf, 512, 0, NULL, NULL);
+			recvfrom(s, buf, 512, 0, (struct sockaddr *)&peer, &peer_len);
 			
 			if (buf[0] == KEEP_ALIVE) {
 				i = buf[1] - 1;
+				printf("Got a KEEP_ALIVE from id:%d\n", i+1);
+				if (live_nbors[i] == 0)
+					switches[i] = peer;
 				mcount[i] = 0;
 				live_nbors[i] = 1;
 			}	
 			else if (buf[0] == ROUTE_UPDATE) {
+				printf("Got a ROUTE_UPDATE from controller\n");
 				memcpy(route, &buf[1], 2*switch_num);
+				print_route(route, id, switch_num);
 			}
 			
 			time_rem(&trem, &time1);
@@ -106,13 +117,13 @@ main(int argc, char *argv[])
 				if (nbor[i]) {
 					buf[0] = KEEP_ALIVE;
 					buf[1] = id;
-					sendto(s, buf, 2, 0, (struct sockaddr *) &switches[i], controller_addr->ai_addrlen);
+					sendto(s, buf, 2, 0, (struct sockaddr *) &switches[i], peer_len);
 				}
 			}
 			buf[0] = TOPOLOGY_UPDATE;
 			buf[1] = id;
 			memcpy(&buf[2], live_nbors, switch_num);
-			sendto(s, buf, 2+switch_num, 0, controller_addr->ai_addr, controller_addr->ai_addrlen);
+			sendto(s, buf, 2+switch_num, 0, controller_addr->ai_addr, peer_len);
 
 		}
 	}
@@ -126,3 +137,11 @@ main(int argc, char *argv[])
 	exit(EXIT_SUCCESS);
 }
 
+static void 
+print_route(char *route, int id, int num) {
+	int i;
+
+	printf("new route:\n");
+	for (i = 0; i < num; i++) 
+		printf("%d, %d : %d\n", id, i+1, route[2*i+1]+1);
+}
