@@ -15,11 +15,11 @@
 #define TOPOLOGY_UPDATE 5	// 1 : 1 : switch_num , msgid : switch_id : list of live neighbors(1,0)
 
 #ifndef KTIME
-#define KTIME 1
+#define KTIME 2
 #endif
 
 #ifndef MTIME
-#define MTIME 6
+#define MTIME 5
 #endif
 
 int sock_bind(int domain, int type, const char *hostname, const char *servname);

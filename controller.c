@@ -83,10 +83,10 @@ int main(int argc, char *argv[])
 		write_route(&buf[2+switch_num], i, path_matr, switch_num);
 		
 		sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
+		printf("sent initial REGISTER_RESPONSE to: %d\n", i+1);
 	}
-        for (i = 0; i < switch_num; i++) {
-                print_sockaddr((struct sockaddr *) &switches[i]);
-        }
+
+	print_path(path_matr, switch_num);
 
 
 	//main loop
@@ -128,6 +128,7 @@ int main(int argc, char *argv[])
 				}
 				write_route(&buf[2+switch_num], id-1, path_matr, switch_num);
 				sendto(s, buf, len, 0, (struct sockaddr *)&switches[id-1], peer_len);
+				printf("sent new REGISTER_RESPONSE to: %d\n", id);
 
 				len = 1 + 2*switch_num;
 				buf[0] = ROUTE_UPDATE;
@@ -201,7 +202,10 @@ int main(int argc, char *argv[])
 					write_route(&buf[1], i, path_matr, switch_num);
 					sendto(s, buf, len, 0, (struct sockaddr *)&switches[i], peer_len);
 				}
+				print_path(path_matr, switch_num);
 			}
+		
+			printf("\n");
 		}
 	}	
 
@@ -250,6 +254,12 @@ compute_path(int **path_matr, int **band_matr, int num) {
 					path_matr[i][j] = path_matr[i][k];
 				}
 			}
+		}
+	}
+	for (i = 0; i < num; i++) {
+		for (j = 0; j < num; j++) {
+			if (bw[i][j] == 0)
+				path_matr[i][j] = -1;
 		}
 	}
 	return;
